@@ -1,0 +1,85 @@
+name: Deploy to GitHub Pages
+
+# Builds the Module Federation remote and publishes dist/assets/ to GitHub
+# Pages, which serves it as a CDN: a Horizon host loads
+#   https://<owner>.github.io/<repo>/remoteEntry.js
+# Pages sends `Access-Control-Allow-Origin: *`, so cross-origin loading by the
+# host works. The page renders nothing standalone — this is a headless remote.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One in-flight deploy at a time; don't cancel a running publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # the version guard below diffs against the previous commit
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      # The entry URL is stable, so the registered version is the only thing
+      # that tells Horizon to re-verify. Publishing new bytes under an unchanged
+      # version means nothing re-verifies: the platform goes on enforcing the
+      # previous bytes' hash against the new ones at the same URL, every host
+      # fails its integrity check, and the app silently stops appearing — no
+      # verdict, no finding, nothing explaining it. Hence a guard, not a
+      # convention. A push touching only documentation passes untouched.
+      - name: Refuse to ship changed bytes under an unchanged version
+        run: |
+          PREV=$(git show HEAD~1:package.json 2>/dev/null | node -p "try{JSON.parse(require('fs').readFileSync(0,'utf8')).version}catch(e){''}" || echo "")
+          THIS=$(node -p "require('./package.json').version")
+          [ -z "$PREV" ] && exit 0
+          [ "$PREV" != "$THIS" ] && exit 0
+          git diff --quiet HEAD~1 HEAD -- src webpack.config.cjs package.json package-lock.json && exit 0
+          echo "::error::Bundle inputs changed but the version is still $THIS. Bump it."
+          exit 1
+
+      - run: npm run typecheck
+      - run: npm run build
+
+      # Per-chunk SRI and source maps are both hard requirements of the
+      # platform's bundle analyser. Fail here rather than at submission.
+      - name: Bundle carries integrity values and source maps
+        run: |
+          grep -q 'integrity' dist/assets/remoteEntry.js \
+            || { echo "::error::remoteEntry.js carries no chunk integrity values"; exit 1; }
+          ls dist/assets/*.map >/dev/null 2>&1 \
+            || { echo "::error::no source maps emitted"; exit 1; }
+          ! grep -q 'integrity.*\*-' dist/assets/remoteEntry.js \
+            || { echo "::error::unresolved integrity placeholders in remoteEntry.js"; exit 1; }
+
+      # Stop Jekyll from stripping webpack's _-prefixed files.
+      - run: touch dist/assets/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/assets
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
