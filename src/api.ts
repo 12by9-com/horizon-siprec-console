@@ -12,26 +12,63 @@
 
 import { HorizonProps } from './horizon';
 
-// Where the SIPREC platform lives, as a SAME-ORIGIN path — never a hostname.
+// Where the SIPREC platform lives.
 //
-// The bundle has to be instance-independent: one build, served from one place,
-// loaded by any number of Horizon clusters that each record to a different
-// platform. A hostname baked in at build time cannot do that — it pins every
-// cluster to whichever backend the builder happened to name.
+// The bundle is instance-independent — one build, published once, loaded by any
+// number of Horizon clusters that each record to a different platform — so it
+// cannot have an address built in. Horizon also cannot tell it: the only thing
+// the operator configures there is the Remote Entry URL, the Callback URL and
+// the Callback secret, and Horizon rebuilds the token response, forwarding only
+// accessToken/tokenType/expiresAt/user, so an extra field would be dropped.
 //
-// A federated remote is FETCHED cross-origin but EXECUTES in the host page's
-// origin, so a relative path resolves against the Horizon portal that loaded
-// it. Each cluster then points this prefix wherever its own recorder lives,
-// with an Apache stanza on the portal host:
+// The access token IS passed through verbatim, so the platform puts its own
+// address in it: `<base64url(api_base)>.<random>`. The app reads where to call
+// out of the token it was just given. That cannot point anywhere wrong — the
+// token only exists because the registration's Callback URL reached that
+// platform, so it can only name that platform.
 //
-//   ProxyPass /siprec-api/ https://<that cluster's platform>/api/
-//
-// Three things fall out of this for free: no mixed content (the portal is
-// HTTPS and the proxy hop is the server's problem, not the browser's), no
-// CORS (same origin, so horizonCors() is never exercised on this path), and
-// somewhere server-side to attach a per-instance credential that a browser
-// bundle could never hold.
+// SIPREC_API is the FALLBACK, for a token that names no address: a platform
+// that does not announce one, or the standalone harness, whose Vite dev server
+// proxies this same-origin path. It used to be the only route, via a reverse
+// proxy stanza on every portal; that stanza is no longer needed.
 export const SIPREC_API = '/siprec-api';
+
+// The last address a token announced. Kept for the one call that carries no
+// token — receipt verification, which is unauthenticated by design — and which
+// only ever happens after the page has already loaded data with one.
+let announcedBase: string | null = null;
+
+// The API address a token carries, or null. Only https is accepted: the
+// console runs inside an HTTPS portal, where a browser refuses plain http as
+// mixed content, and nothing but an https URL should ever be fetched from.
+export function apiBaseFromToken(token: string): string | null {
+  const dot = token.indexOf('.');
+  if (dot <= 0) return null;
+  let b64 = token.slice(0, dot).replace(/-/g, '+').replace(/_/g, '/');
+  // The platform strips base64 padding to keep the token URL-safe. Restore it:
+  // some decoders tolerate its absence, and one that does not silently drops
+  // the final characters instead of failing.
+  while (b64.length % 4) b64 += '=';
+  try {
+    const url = new URL(atob(b64));
+    if (url.protocol !== 'https:') return null;
+    return url.href.replace(/\/+$/, '');
+  } catch {
+    return null;
+  }
+}
+
+// Where to send a request made with this token.
+function baseFor(token: string): string {
+  const base = apiBaseFromToken(token);
+  if (base) announcedBase = base;
+  return base ?? SIPREC_API;
+}
+
+// Where an unauthenticated request should go — the last announced address.
+export function currentApiBase(): string {
+  return announcedBase ?? SIPREC_API;
+}
 
 export const VENDOR_ID = 'siprec';
 
@@ -401,7 +438,7 @@ async function call<T>(
   props: Partial<HorizonProps>, path: string, init: RequestInit = {}, attempt = 0,
 ): Promise<T> {
   const token = await bearer(props, attempt > 0);
-  const res = await fetch(`${SIPREC_API}/${path}`, {
+  const res = await fetch(`${baseFor(token)}/${path}`, {
     ...init,
     headers: {
       ...(init.headers || {}),
@@ -482,7 +519,7 @@ export const siprec = {
   // with an <audio src>. The blob URL is revoked by the caller.
   audioUrl: async (props: Partial<HorizonProps>, uuid: string, attempt = 0): Promise<string> => {
     const token = await bearer(props, attempt > 0);
-    const res = await fetch(`${SIPREC_API}/horizon_recordings.php?audio=${encodeURIComponent(uuid)}`,
+    const res = await fetch(`${baseFor(token)}/horizon_recordings.php?audio=${encodeURIComponent(uuid)}`,
       { headers: { Authorization: `Bearer ${token}` } });
     if (res.status === 401 && attempt === 0) {
       return siprec.audioUrl(props, uuid, 1);
@@ -554,7 +591,7 @@ export const siprec = {
   // because holding the receipt is the only thing that should be required.
   verifyReceipt: async (receiptId: string): Promise<ReceiptVerification> => {
     const res = await fetch(
-      `${SIPREC_API}/portal_receipt_verify.php?receipt_id=${encodeURIComponent(receiptId)}`);
+      `${currentApiBase()}/portal_receipt_verify.php?receipt_id=${encodeURIComponent(receiptId)}`);
     if (!res.ok) {
       let message = `Verification failed (${res.status})`;
       try {
@@ -567,7 +604,7 @@ export const siprec = {
   },
 
   receiptUrl: (receiptId: string) =>
-    `${SIPREC_API}/portal_receipt_verify.php?receipt_id=${encodeURIComponent(receiptId)}`,
+    `${currentApiBase()}/portal_receipt_verify.php?receipt_id=${encodeURIComponent(receiptId)}`,
 
   scopeAccess: (props: Partial<HorizonProps>) =>
     call<{ visibilities: Visibility[]; scopes: ScopePolicy[] }>(props, 'horizon_scope_access.php'),

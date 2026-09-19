@@ -1,7 +1,7 @@
 {
   "name": "horizon-siprec-console",
   "private": true,
-  "version": "0.5.8",
+  "version": "0.5.11",
   "type": "module",
   "description": "SIPREC recording console as a federated Horizon app \u2014 identity stub",
   "scripts": {

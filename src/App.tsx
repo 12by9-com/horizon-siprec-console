@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { HorizonProps, aorFor } from './horizon';
-import { SIPREC_API, siprec, WhoAmI } from './api';
+import { SIPREC_API, currentApiBase, siprec, WhoAmI } from './api';
 import { RecordingsPage } from './RecordingsPage';
 import { ConsentPage } from './ConsentPage';
 import { AccessAdmin } from './AccessAdmin';
@@ -194,10 +194,11 @@ function formatExpiry(expiresAt: number): string {
 // unconditionally, and above the platform's own answers on purpose: the case
 // this exists for is the one where those answers never arrive.
 function resolvedApi(): string {
+  const base = currentApiBase();
   try {
-    return new URL(SIPREC_API, window.location.origin).href;
+    return new URL(base, window.location.origin).href;
   } catch {
-    return SIPREC_API;
+    return base;
   }
 }
 
@@ -276,14 +277,17 @@ export const DiagnosticsPage: React.FC<{ host: Partial<HorizonProps> }> = ({ hos
       </p>
 
       <h3>Recording platform endpoint</h3>
-      <Field label="API prefix" value={SIPREC_API} />
-      <Field label="resolves to" value={resolvedApi()} />
+      <Field label="calling" value={resolvedApi()} />
+      <Field label="source" value={currentApiBase() === SIPREC_API
+        ? 'fallback \u2014 no token has named an address yet'
+        : 'announced by the platform, inside its token'} />
       <p style={{ opacity: 0.7, fontSize: 13 }}>
-        The prefix is the same in every build — this app is deliberately not
-        tied to one platform. Where it actually goes is decided by a proxy
-        stanza on <b>this portal</b>, so the resolved URL above names the portal,
-        not the recorder behind it. If everything below fails with 404, that
-        stanza is missing or misrouted on this host; nothing needs rebuilding.
+        One bundle serves every Horizon cluster, so the platform&rsquo;s address is not
+        built in. The platform names itself inside the token it issues, and the app calls
+        wherever that says &mdash; so which recorder this portal talks to is decided by
+        the Callback URL on its Registered Apps page, and nothing else. Until the first
+        token arrives it shows the <code>{SIPREC_API}</code> fallback, which only
+        resolves where a portal still proxies that path.
       </p>
 
       <h3>Identity from the recording platform</h3>

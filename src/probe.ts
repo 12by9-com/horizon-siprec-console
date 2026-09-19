@@ -1,4 +1,4 @@
-import { SIPREC_API } from './api';
+import { SIPREC_API, currentApiBase } from './api';
 import { groupDiagnostics, probeRecordings } from './callGroups';
 import { callIdDiagnostics, probeCallIdLookup } from './cdrCallIds';
 import { hostProps } from './host';
@@ -27,10 +27,11 @@ import { consentDiagnostics, probeUserConsent } from './userConsent';
 // far end. Reporting both says what the app asked for AND which portal was
 // asked, which is the pair a misrouted proxy shows up in.
 function apiUrl(): string {
+  const base = currentApiBase();
   try {
-    return new URL(SIPREC_API, window.location.origin).href;
+    return new URL(base, window.location.origin).href;
   } catch {
-    return SIPREC_API;
+    return base;
   }
 }
 
