@@ -83,24 +83,9 @@ export default defineConfig({
         // the page, in local storage, in the URL, or in anything the browser
         // can read back — which is the point: a harness should not need a
         // credential pasted into it.
-        //
-        // The instance key rides alongside, from the environment for the same
-        // reason: a portal injects one server-side to say which Horizon
-        // instance a request came through, and a platform that enforces this
-        // refuses anything without it. The harness IS another instance as far
-        // as the platform is concerned, so it presents its own key rather than
-        // being exempted — an exemption for loopback is the kind that quietly
-        // becomes the way in.
-        //
-        //   php horizon_instance_admin.php add "local dev harness"
-        headers: {
-          ...(process.env.SIPREC_HARNESS_TOKEN
-            ? { Authorization: `Bearer ${process.env.SIPREC_HARNESS_TOKEN}` }
-            : {}),
-          ...(process.env.SIPREC_INSTANCE_KEY
-            ? { 'X-Siprec-Instance-Key': process.env.SIPREC_INSTANCE_KEY }
-            : {}),
-        },
+        headers: process.env.SIPREC_HARNESS_TOKEN
+          ? { Authorization: `Bearer ${process.env.SIPREC_HARNESS_TOKEN}` }
+          : undefined,
       },
     },
     port: 5011,
