@@ -6,6 +6,7 @@ import {
 } from './api';
 import { PURPOSE_LABELS, PROOF_LABELS } from './purposes';
 import { SelfConsent } from './SelfConsent';
+import { MyAddresses } from './MyAddresses';
 import { ReceiptModal } from './ReceiptModal';
 
 // Per-purpose consent for whoever the signed-in user is entitled to act on.
@@ -199,6 +200,11 @@ export const ConsentPage: React.FC<{ host: Partial<HorizonProps> }> = ({ host })
           </div>
         )
       )}
+
+      {/* Their own addresses, below the decision they apply to, and shown
+          whether or not a consent record exists yet: being signed in already
+          proves the seat. */}
+      {!loading && access?.visibility === 'own' && <MyAddresses host={host} />}
 
       {/* The table outgrew the viewport once Proof and Receipt were added, and
           the overflow was silently clipped — the Receipt column simply was not

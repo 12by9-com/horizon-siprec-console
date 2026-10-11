@@ -479,6 +479,14 @@ async function call<T>(
   return body as T;
 }
 
+export interface MyIdentity {
+  identifiers: Array<{ id: number; scheme: string; value: string; proven: boolean; proof: string | null; can_prove: boolean }>;
+  proven: boolean;
+  anchor_id: number;
+  display_name?: string | null;
+  channels: { email: boolean; matrix: boolean };
+}
+
 export const siprec = {
   recordings: (props: Partial<HorizonProps>, search = '') =>
     call<{ identity: Identity; access: AccessInfo; recordings: Recording[] }>(
@@ -529,6 +537,25 @@ export const siprec = {
     }
     return URL.createObjectURL(await res.blob());
   },
+
+  // The signed-in person's own addresses (horizon_identity.php). Being here
+  // is the proof of the seat — NetSapiens bound the uid to the sign-in and the
+  // callback is HMAC-verified — so from it the person may prove and link their
+  // email or chat with a one-time code, and remove what they linked.
+  identity: (props: Partial<HorizonProps>) =>
+    call<MyIdentity>(props, 'horizon_identity.php'),
+  identityStart: (props: Partial<HorizonProps>, address: string) =>
+    call<{ challenge_id: string; channel: string; masked: string }>(props, 'horizon_identity.php', {
+      method: 'POST', body: JSON.stringify({ step: 'start', address }),
+    }),
+  identityVerify: (props: Partial<HorizonProps>, challenge_id: string, code: string) =>
+    call<MyIdentity>(props, 'horizon_identity.php', {
+      method: 'POST', body: JSON.stringify({ step: 'verify', challenge_id, code }),
+    }),
+  identityUnlink: (props: Partial<HorizonProps>, identifier_id: number) =>
+    call<MyIdentity>(props, 'horizon_identity.php', {
+      method: 'POST', body: JSON.stringify({ step: 'unlink', identifier_id }),
+    }),
 
   consent: (props: Partial<HorizonProps>) =>
     call<{

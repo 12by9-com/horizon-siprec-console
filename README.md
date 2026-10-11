@@ -6,7 +6,7 @@ giving Horizon users their recordings and their consent without leaving the port
 | Tab | What it does |
 |---|---|
 | **Recordings** | Search and in-page playback of the conversations the signed-in user may see |
-| **Consent** | Per-purpose consent (recording / transcription / analysis / AI training), issuing an Ed25519-signed receipt identical to the data-subject portal's |
+| **Consent** | Per-purpose consent (recording / transcription / analysis / AI training), issuing an Ed25519-signed receipt identical to the data-subject portal's. In the self view, **My addresses** lets the signed-in person (proven by the sign-in itself) link their email or chat account with a one-time code, so the same decision covers every channel |
 | **Access** | Super User only — raises or lowers every other role's reach, without a deploy |
 | **Diagnostics** | What Horizon actually passes to the app; the fastest check on a fresh deploy |
 
