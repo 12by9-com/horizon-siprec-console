@@ -172,6 +172,10 @@ export interface GeneratedBy {
   language?: string;
   channel?: number;
   confidence?: number;
+  // Seconds into the recording, on one utterance. Absent on transcripts made
+  // before utterances were timed (17 Oct 2026), which were one entry per side.
+  offset?: number;
+  end?: number;
 }
 
 export interface TranscriptSegment {

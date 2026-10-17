@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { HorizonProps } from './horizon';
 import { VconModal } from './VconModal';
 import {
-  siprec, Recording, AccessInfo, Identity, Transcript, TranscriptStatus,
+  siprec, Recording, AccessInfo, Identity, Transcript, TranscriptSegment, TranscriptStatus,
   scopedTitle, visibilityLabel,
 } from './api';
 
@@ -39,6 +39,82 @@ function confidenceLabel(c?: number | null): string | null {
   return typeof c === 'number' ? `${Math.round(c * 100)}% confidence` : null;
 }
 
+// --- Conversation view of a timed transcript -------------------------------
+//
+// Mirrors the SIPREC console's Transcript popup, so the two read alike.
+
+// One colour per participant, keyed on their audio channel — one per
+// participant — so a speaker keeps the same colour all the way down.
+const SPEAKER_COLORS = ['#2a78d6', '#C8862F', '#2e9e6b', '#9b59b6', '#d35454', '#5b6b7f'];
+
+// A speaker's consecutive utterances are one turn unless they paused this
+// long — then a new timestamp is worth showing.
+const TURN_GAP_SECONDS = 4;
+
+interface ConversationTurn {
+  key: number;
+  speaker: string;
+  colour: number;
+  start: number;
+  end: number | null;
+  text: string;
+  confidence: number | null;
+  overlaps: boolean;
+}
+
+const formatOffset = (seconds: number): string => {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+// Every party's timed utterances in the order they were spoken, a speaker's
+// run of lines joined into one turn. Null when the transcript carries no
+// timing — made before utterances were timed — so the caller falls back to
+// the plain per-entry list.
+function conversationTurns(segments: TranscriptSegment[]): ConversationTurn[] | null {
+  const timed = segments.filter(s => s.is_transcript && (s.text ?? '').trim() !== ''
+    && s.generated_by?.offset != null);
+  if (timed.length === 0) return null;
+  timed.sort((a, b) => (a.generated_by!.offset! - b.generated_by!.offset!) || (a.index - b.index));
+
+  const turns: ConversationTurn[] = [];
+  const confidences: number[][] = [];
+  // When each speaker last stopped, to tell a reply from an interruption.
+  const lastEndBySpeaker = new Map<string, number>();
+  for (const seg of timed) {
+    const g = seg.generated_by!;
+    const start = g.offset!;
+    const end = g.end ?? null;
+    const speaker = seg.speaker || 'Unattributed';
+    const last = turns[turns.length - 1];
+    if (last && last.speaker === speaker
+        && start - (last.end ?? last.start) <= TURN_GAP_SECONDS) {
+      last.text += ' ' + seg.text;
+      if (end != null) last.end = Math.max(last.end ?? end, end);
+      if (g.confidence != null) confidences[confidences.length - 1].push(g.confidence);
+    } else {
+      turns.push({
+        key: seg.index,
+        speaker,
+        colour: g.channel != null ? g.channel - 1 : turns.length,
+        start,
+        end,
+        text: seg.text!,
+        confidence: null,
+        overlaps: Array.from(lastEndBySpeaker.entries())
+          .some(([who, stopped]) => who !== speaker && start < stopped),
+      });
+      confidences.push(g.confidence != null ? [g.confidence] : []);
+    }
+    if (end != null) lastEndBySpeaker.set(speaker, Math.max(lastEndBySpeaker.get(speaker) ?? end, end));
+  }
+  turns.forEach((t, i) => {
+    const c = confidences[i];
+    t.confidence = c.length ? Math.min(...c) : null;
+  });
+  return turns;
+}
+
 // What was said, once a row is expanded.
 //
 // Only segments carrying text are rendered: a vCon's dialog also holds the
@@ -61,6 +137,7 @@ const TranscriptPanel: React.FC<{
   if (!transcript) return null;
 
   const spoken = transcript.segments.filter(s => (s.text ?? '').trim() !== '');
+  const turns = conversationTurns(transcript.segments);
   const meta = [
     transcript.engine,
     transcript.model,
@@ -79,6 +156,35 @@ const TranscriptPanel: React.FC<{
         <div style={{ opacity: 0.7 }}>
           {transcript.note ?? 'This recording carries no readable text.'}
         </div>
+      ) : turns ? (
+        <>
+          <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 8 }}>
+            Each participant recognised from their own audio channel and placed
+            by when they spoke.
+          </div>
+          {turns.map(turn => (
+            <div key={turn.key} style={{
+              borderLeft: `3px solid ${SPEAKER_COLORS[turn.colour % SPEAKER_COLORS.length]}`,
+              paddingLeft: 10, marginBottom: 10,
+            }}>
+              <div style={{ fontSize: 12, marginBottom: 2 }}>
+                <span style={{ fontWeight: 600 }}>{turn.speaker}</span>
+                <span style={{ fontFamily: 'monospace', opacity: 0.7 }}>
+                  {' '}{formatOffset(turn.start)}{turn.end != null && `–${formatOffset(turn.end)}`}
+                </span>
+                {turn.confidence != null && (
+                  <span style={{ opacity: 0.7 }}>
+                    {' '}· {Math.round(turn.confidence * 100)}%{turn.confidence < 0.5 && ' ⚠'}
+                  </span>
+                )}
+                {turn.overlaps && (
+                  <span style={{ opacity: 0.7 }} title="Began while someone else was still speaking"> · overlapping</span>
+                )}
+              </div>
+              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{turn.text}</div>
+            </div>
+          ))}
+        </>
       ) : spoken.map(s => (
         <div key={s.index} style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
           <div style={{ minWidth: 130, fontWeight: 600, fontSize: 13 }}>
